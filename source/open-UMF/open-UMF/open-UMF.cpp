@@ -10,15 +10,20 @@
 #include <IPHlpApi.h>
 #endif // _WIN32
 
-struct systeminfo_t
+enum
 {
-	std::string machineName;
-	std::array< uint16_t, 5 > systemUID;
+	HASHID_MACHINENAME = 0,
+	HASHID_CPU,
+	HASHID_VOLUME,
+	HASHID_MAC1,
+	HASHID_MAC2,
+	HASHID_CHECKDIGITS,
+	HASHID_MAX
 };
 
-static const std::array< uint16_t, 5 > s_u16Mask = { 0x4e25, 0xf4a1, 0x5437, 0xab41, 0x0000 };
+static const std::array< uint16_t, HASHID_MAX > s_u16Mask = { 0x6f90, 0x4e25, 0xf4a1, 0x5437, 0xab41, 0x0000 };
 
-static void S_Smear( std::array< uint16_t, 5 > &id )
+static void S_Smear( std::array< uint16_t, HASHID_MAX > &id )
 {
 	for ( size_t i = 0; i < id.size(); ++i )
 	{
@@ -27,12 +32,12 @@ static void S_Smear( std::array< uint16_t, 5 > &id )
 			if ( i != j )
 				id[ i ] ^= id[ j ];
 		}
-
-		for ( size_t i = 0; i < s_u16Mask.size(); ++i )
-			id[ i ] ^= s_u16Mask[ i ];
 	}
+
+	for ( size_t i = 0; i < s_u16Mask.size(); ++i )
+		id[ i ] ^= s_u16Mask[ i ];
 }
-static void S_UnSmear( std::array< uint16_t, 5 > &id )
+static void S_UnSmear( std::array< uint16_t, HASHID_MAX > &id )
 {
 	for ( size_t i = 0; i < id.size(); ++i )
 		id[ i ] ^= s_u16Mask[ i ];
@@ -42,27 +47,28 @@ static void S_UnSmear( std::array< uint16_t, 5 > &id )
 		for ( size_t j = 0; j < i; ++j )
 		{
 			if ( i != j )
-				id[ 4 - 1 ] ^= id[ 4 - j ];
+				id[ HASHID_CHECKDIGITS - i ] ^= id[ HASHID_CHECKDIGITS - j ];
 		}
 	}
 }
 
-static const std::array< uint16_t, 5 > &computeSystemUniqueId()
+static const std::array< uint16_t, HASHID_MAX > &computeSystemUniqueId()
 {
-	static std::array< uint16_t, 5 > id = {};
+	static std::array< uint16_t, HASHID_MAX > id = {};
 	static bool bComputed = false;
 
 	if ( bComputed )
 		return id;
 
 	// Produce a number that uniquely identifies this system.
-	id[ 0 ] = getCpuHash();
-	id[ 1 ] = getVolumeHash();
-	getMacHash( id[ 2 ], id[ 3 ] );
+	id[ HASHID_MACHINENAME ] = getMachineNameHash();
+	id[ HASHID_CPU ] = getCpuHash();
+	id[ HASHID_VOLUME ] = getVolumeHash();
+	getMacHash( id[ HASHID_MAC1 ], id[ HASHID_MAC2 ] );
 
 	// Last block is some check-digits
-	for ( uint32_t i = 0; i < id.size() - 1; ++i )
-		id[ id.size() - 1 ] += id[ i ];
+	for ( size_t i = 0; i < HASHID_CHECKDIGITS; ++i )
+		id[ HASHID_CHECKDIGITS ] += id[ i ];
 
 	S_Smear( id );
 	bComputed = true;
@@ -73,15 +79,17 @@ static const std::array< uint16_t, 5 > &computeSystemUniqueId()
 std::string getSystemUniqueId()
 {
 	std::stringstream ss;
-	ss << getMachineName().c_str(); // TODO: Figure out why this breaks if it's not a C string
 
 	const auto &id = computeSystemUniqueId();
-	for ( size_t i = 0; i < id.size(); ++i )
+	bool bLoopedOnce = false;
+
+	for ( size_t i = 0; i < id.size(); ++i, bLoopedOnce = true )
 	{
+		if ( bLoopedOnce )
+			ss << "-";
+
 		std::array< char, 16 > num;
 		std::snprintf( &num[ 0 ], num.size(), "%x", id[ i ] );
-
-		ss << "-";
 
 		switch ( std::strlen( &num[ 0 ] ) )
 		{
@@ -107,19 +115,28 @@ std::string getSystemUniqueId()
 	return systemUID;
 }
 
-bool unpackID( const std::string &systemUID, systeminfo_t &dstInfo )
+bool unpackID( const std::string &systemUID, std::array< uint16_t, HASHID_MAX > &dstID )
 {
-	std::array< uint16_t, 5 > id = {};
+	std::array< uint16_t, HASHID_MAX > id = {};
+	size_t offset = 0;
+
+	std::string uID = systemUID;
+	const std::string delimiter = "-";
 
 	// Unpack the given string. Parse failures return false.
-	size_t offset = systemUID.find( "-" );
-	std::string machineName = systemUID.substr( 0, offset );
-	if ( machineName.empty() )
-		return false;
-
 	for ( size_t i = 0; i < id.size(); ++i )
 	{
-		std::string testNum = systemUID.substr( offset, offset = systemUID.find( "-", offset ) );
+		offset = uID.find( delimiter );
+
+		std::string testNum = "";
+
+		if ( offset != std::string::npos )
+		{
+			testNum = uID.substr( 0, offset );
+			uID.erase( 0, offset + delimiter.length() );
+		}
+		else
+			testNum = uID;
 
 		if ( testNum.empty() )
 			return false;
@@ -131,39 +148,35 @@ bool unpackID( const std::string &systemUID, systeminfo_t &dstInfo )
 
 	// Make sure the ID is valid - by looking at check-digits
 	uint16_t check = 0;
-	for ( uint32_t i = 0; i < id.size() - 1; ++i )
+	for ( size_t i = 0; i < HASHID_CHECKDIGITS; ++i )
 		check += id[ i ];
 
-	if ( check != id[ id.size() - 1 ] )
+	if ( check != id[ HASHID_CHECKDIGITS ] )
 		return false;
 
-	dstInfo.machineName = machineName;
-	dstInfo.systemUID = id;
+	dstID = id;
 
 	return true;
 }
 
 bool validateSystemUniqueId( const std::string &systemUID, const std::string &otherSystemUID )
 {
-	systeminfo_t testInfo = {};
-	systeminfo_t otherInfo = {};
+	std::array< uint16_t, HASHID_MAX > testID = {};
+	std::array< uint16_t, HASHID_MAX > otherID = {};
 
-	if ( !unpackID( systemUID, testInfo ) )
+	if ( !unpackID( systemUID, testID ) )
 		return false;
 
-	if ( !unpackID( otherSystemUID, otherInfo ) )
+	if ( !unpackID( otherSystemUID, otherID ) )
 		return false;
 
 	uint32_t score = 0;
 
-	for ( size_t i = 0; i < testInfo.systemUID.size() - 1; ++i )
+	for ( size_t i = 0; i < testID.size() - 1; ++i )
 	{
-		if ( testInfo.systemUID[ i ]  == otherInfo.systemUID[ i ] )
+		if ( testID[ i ]  == otherID[ i ] )
 			++score;
 	}
-
-	if ( testInfo.machineName == otherInfo.machineName )
-		++score;
 
 	// If we score 3 points or more, then the ID matches
 	return ( score >= 3 ) ? true : false;
@@ -210,6 +223,17 @@ uint16_t getVolumeHash()
 	GetVolumeInformation( &driveLetter[ 0 ], nullptr, 0, &serialNum, nullptr, nullptr, nullptr, 0 );
 
 	uint16_t hash = ( uint16_t )( ( serialNum + ( serialNum >> 16 ) ) & 0xFFFF );
+	return hash;
+}
+
+uint16_t getMachineNameHash()
+{
+	std::string machineName = getMachineName();
+	uint16_t hash = 0;
+	
+	for ( size_t i = 0; i < machineName.size(); ++i )
+		hash += static_cast< uint16_t >( machineName[ i ] );
+
 	return hash;
 }
 

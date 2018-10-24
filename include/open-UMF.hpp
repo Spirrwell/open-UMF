@@ -8,6 +8,7 @@ std::string getSystemUniqueId();
 bool validateSystemUniqueId( const std::string &systemUID, const std::string &otherSystemUID );
 void getMacHash( uint16_t &mac1, uint16_t &mac2 );
 uint16_t getVolumeHash();
+uint16_t getMachineNameHash();
 uint16_t getCpuHash();
 std::string getMachineName();
 
