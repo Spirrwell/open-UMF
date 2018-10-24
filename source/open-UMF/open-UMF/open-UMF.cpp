@@ -73,7 +73,7 @@ static const std::array< uint16_t, 5 > &computeSystemUniqueId()
 std::string getSystemUniqueId()
 {
 	std::stringstream ss;
-	ss << getMachineName();
+	ss << getMachineName().c_str(); // TODO: Figure out why this breaks if it's not a C string
 
 	const auto &id = computeSystemUniqueId();
 	for ( size_t i = 0; i < id.size(); ++i )
@@ -229,7 +229,7 @@ uint16_t getCpuHash()
 
 std::string getMachineName()
 {
-	std::string computerName( 1024, ' ' );
+	std::string computerName( 1024, '\0' );
 	DWORD size = 1024;
 
 	GetComputerName( &computerName[ 0 ], &size );
