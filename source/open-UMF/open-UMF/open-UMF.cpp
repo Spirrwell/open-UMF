@@ -14,7 +14,6 @@ open-UMF:
 #include "open-UMF.hpp"
 
 #include <algorithm>
-#include <array>
 #include <sstream>
 
 #ifdef _WIN32

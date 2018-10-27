@@ -17,6 +17,7 @@ open-UMF:
 
 #include <cstdint>
 #include <string>
+#include <array>
 
 namespace OUMF
 {
